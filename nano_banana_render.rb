@@ -5,9 +5,8 @@ require 'sketchup.rb'
 require 'extensions.rb'
 
 module NanoBananaRender
-  PLUGIN_DIR = File.dirname(__FILE__)
   PLUGIN_NAME = 'Nano Banana Pro Render'.freeze
-  PLUGIN_VERSION = '1.0.0'.freeze
+  PLUGIN_VERSION = '1.1.0'.freeze
   PLUGIN_DESCRIPTION = 'One-click AI rendering via Nano Banana Pro with before/after comparison'.freeze
 
   extension = SketchupExtension.new(PLUGIN_NAME, File.join('nano_banana_render', 'main'))

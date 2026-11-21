@@ -3,6 +3,8 @@ import base64
 import json
 import re
 import sys
+import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -101,9 +103,28 @@ def process(job, send=generate):
 
 def main():
     try:
-        result = {"value": process(json.load(sys.stdin.buffer))}
-    except (ValueError, KeyError, OSError) as exc:
-        result = {"error": str(exc)}
+        job = json.load(sys.stdin.buffer)
+        started = time.monotonic()
+        value = process(job)
+        if job.get("result_dir") and job["action"] == "render":
+            directory = Path(job["result_dir"])
+            value["original"] = "original.png"
+            for index, render in enumerate(value["renders"]):
+                if not render["success"]:
+                    print(f"variation {index + 1} failed: {render['error']}", file=sys.stderr)
+                    continue
+                ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[render["mime"]]
+                name = f"variation-{index + 1}.{ext}"
+                raw = base64.b64decode(render.pop("image"), validate=True)
+                (directory / name).write_bytes(raw)
+                render["file"] = name
+                print(f"variation {index + 1} saved bytes={len(raw)}", file=sys.stderr)
+        result = {"value": value}
+        print(f"worker complete elapsed={time.monotonic() - started:.1f}s", file=sys.stderr)
+    except Exception as exc:
+        frame = traceback.extract_tb(exc.__traceback__)[-1]
+        print(f"{type(exc).__name__} at {Path(frame.filename).name}:{frame.lineno}", file=sys.stderr)
+        result = {"error": f"{type(exc).__name__}: {exc}"}
     print(json.dumps(result, ensure_ascii=True))
 
 

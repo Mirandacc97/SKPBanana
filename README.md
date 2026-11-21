@@ -38,3 +38,10 @@ O Gemini continua disponível no seletor e usa a chave Google informada no paine
 ## Verificação
 
 Execute `python -m unittest discover -s tests -v` na raiz do repositório. A homologação no SketchUp 2024 requer instalar o pacote, abrir uma cena, gerar uma variação e salvar o arquivo.
+
+
+## Diagnóstico da renderização
+
+Em **Plugins → Nano Banana Pro Render → Open diagnostic folder**, cada tentativa tem uma pasta própria. No Windows, ela fica em `%LOCALAPPDATA%/SKPBanana/runs`. O arquivo `diagnostic.log` registra a captura, o processo Python, o encerramento e o carregamento da prévia. O arquivo `worker.log` registra as etapas do provedor e erros de execução, mesmo com o console fechado.
+
+A captura e as variações ficam nessa pasta para recuperação e podem ser removidas depois de salvar o resultado. Para suporte, envie os dois logs da tentativa. Os arquivos de imagem e a resposta do worker podem conter material do projeto.

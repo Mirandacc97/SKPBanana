@@ -312,10 +312,10 @@
                onmousedown="startSlide(event, ${i})"
                ontouchstart="startSlide(event, ${i})">
             <div class="img-after">
-              <img src="data:${render.mime};base64,${render.image}" alt="Rendered" draggable="false">
+              <img src="${render.file}" alt="Rendered" draggable="false">
             </div>
             <div class="img-before" id="before-${i}" style="width: 50%;">
-              <img src="data:image/png;base64,${data.original}" alt="Original" draggable="false">
+              <img src="original.png" alt="Original" draggable="false">
             </div>
             <div class="slider-line" id="line-${i}" style="left: 50%;"></div>
             <div class="slider-handle" id="handle-${i}" style="left: 50%;">
@@ -338,6 +338,22 @@
         `;
       }
 
+      panel.querySelectorAll('img').forEach(img => {
+        const report = () => {
+          const loaded = img.naturalWidth > 0;
+          sketchup.preview_status((loaded ? 'loaded ' : 'failed ') + img.getAttribute('src'));
+          if (!loaded) {
+            const error = document.createElement('p');
+            error.textContent = 'Could not display ' + img.getAttribute('src') + '. See the run folder.';
+            panel.appendChild(error);
+          }
+        };
+        if (img.complete) report();
+        else {
+          img.onload = report;
+          img.onerror = report;
+        }
+      });
       panelsEl.appendChild(panel);
     });
   }
@@ -380,7 +396,7 @@
   function saveImage(index) {
     const render = data.renders[index];
     if (render && render.success) {
-      sketchup.save_image(render.image, render.mime);
+      sketchup.save_image(index);
     }
   }
 

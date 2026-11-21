@@ -1,8 +1,8 @@
 require 'sketchup.rb'
 require 'json'
-require 'open3'
-require 'tempfile'
-require 'base64'
+require 'tmpdir'
+require 'time'
+require 'securerandom'
 require 'fileutils'
 
 module NanoBananaRender
@@ -64,35 +64,87 @@ module NanoBananaRender
       filepath
     end
 
-    def run_worker(dialog, job, capture: nil, &on_success)
-      python = ENV.fetch('SKPBANANA_PYTHON', 'python')
-      task = Thread.new do
+    def guarded_callback(dialog, name)
+      dialog.add_action_callback(name) do |*args|
         begin
-          output, status = Open3.capture2(python, File.join(PLUGIN_DIR, 'worker.py'),
-                                          stdin_data: JSON.generate(job), binmode: true)
-          raise 'Python worker failed' unless status.success?
-          JSON.parse(output)
-        rescue Errno::ENOENT
-          { 'error' => 'Python unavailable. Set SKPBANANA_PYTHON to the executable path.' }
-        rescue StandardError
-          { 'error' => 'Could not read the Python worker response.' }
-        ensure
-          capture.close! if capture
+          yield(*args)
+        rescue StandardError => e
+          report_failure(dialog, run_directory, "#{name}: #{e.class}: #{e.message}")
         end
       end
+    end
 
-      timer = UI.start_timer(0.15, true) do
-        next if task.alive?
-        UI.stop_timer(timer)
-        next unless dialog.visible?
-        reply = task.value
-        dialog.execute_script("setLoading(false)")
-        if reply['error']
-          dialog.execute_script("showStatus(#{JSON.generate(reply['error'])}, 'error')")
-        else
-          on_success.call(reply.fetch('value'))
+    def run_directory
+      root = File.join(ENV['LOCALAPPDATA'] || Dir.tmpdir, 'SKPBanana', 'runs')
+      path = File.join(root, "#{Time.now.strftime('%Y%m%d-%H%M%S')}-#{SecureRandom.hex(4)}")
+      FileUtils.mkdir_p(path)
+      path
+    end
+
+    def diagnose(dir, message)
+      line = "#{Time.now.iso8601} #{message}"
+      puts "[SKPBanana] #{line}"
+      File.open(File.join(dir, 'diagnostic.log'), 'a:utf-8') { |f| f.puts(line) }
+    end
+
+    def report_failure(dialog, dir, message)
+      diagnose(dir, message)
+      text = "#{message} — #{dir}"
+      if dialog.visible?
+        dialog.execute_script("setLoading(false); showStatus(#{JSON.generate(text)}, 'error')")
+      else
+        UI.messagebox(text)
+      end
+    end
+
+    def run_worker(dialog, job, dir: run_directory, &on_success)
+      python = ENV.fetch('SKPBANANA_PYTHON', 'python')
+      stdout = File.join(dir, 'response.json')
+      stderr = File.join(dir, 'worker.log')
+      input, writer = IO.pipe
+      pid = Process.spawn(python, File.join(PLUGIN_DIR, 'worker.py'), in: input,
+                          out: stdout, err: stderr)
+      input.close
+      writer.binmode
+      writer.write(JSON.generate(job))
+      writer.close
+      diagnose(dir, "started pid=#{pid} provider=#{job[:provider]} action=#{job[:action]}")
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      limit = 630 * (job[:count] || 1)
+      timer = UI.start_timer(0.25, true) do
+        begin
+          ended = Process.waitpid2(pid, Process::WNOHANG)
+          unless ended
+            if Process.clock_gettime(Process::CLOCK_MONOTONIC) - started > limit
+              Process.kill('KILL', pid)
+              Process.waitpid(pid)
+              raise "Worker timed out after #{limit}s"
+            end
+            next
+          end
+          UI.stop_timer(timer)
+          status = ended.last
+          diagnose(dir, "exit=#{status.exitstatus} response_bytes=#{File.size(stdout)} stderr_bytes=#{File.size(stderr)}")
+          raise "Python exited with status #{status.exitstatus}. See worker.log" unless status.success?
+          begin
+            reply = JSON.parse(File.read(stdout, encoding: 'utf-8'))
+          rescue JSON::ParserError
+            raise 'Invalid worker JSON. See worker.log and response.json'
+          end
+          raise reply['error'] if reply['error']
+          dialog.execute_script("setLoading(false)") if dialog.visible?
+          on_success.call(reply.fetch('value'), dir)
+        rescue StandardError => e
+          UI.stop_timer(timer)
+          report_failure(dialog, dir, "#{e.class}: #{e.message}")
         end
       end
+    rescue StandardError => e
+      Process.detach(pid) if pid
+      report_failure(dialog, dir, "#{e.class}: #{e.message}")
+    ensure
+      input.close if input && !input.closed?
+      writer.close if writer && !writer.closed?
     end
 
     def show_prompt_dialog
@@ -111,17 +163,17 @@ module NanoBananaRender
         style: UI::HtmlDialog::STYLE_DIALOG
       })
 
-      @dialog.add_action_callback('get_config') do |_ctx|
+      guarded_callback(@dialog, 'get_config') do |_ctx|
         @dialog.execute_script("setConfig(#{JSON.generate(config.merge(render_settings))})")
       end
 
-      @dialog.add_action_callback('save_api_key') do |_ctx, key|
+      guarded_callback(@dialog, 'save_api_key') do |_ctx, key|
         config['api_key'] = key.to_s.strip
         save_config
         @dialog.execute_script("showStatus('API key set for this session', 'success')")
       end
 
-      @dialog.add_action_callback('enhance_prompt') do |_ctx, prompt, provider|
+      guarded_callback(@dialog, 'enhance_prompt') do |_ctx, prompt, provider|
         if provider == 'gemini' && config['api_key'].empty?
           @dialog.execute_script("showStatus('Set your API key first', 'error')")
           next
@@ -135,7 +187,7 @@ module NanoBananaRender
         end
       end
 
-      @dialog.add_action_callback('render') do |_ctx, prompt, num_options, model_name, provider|
+      guarded_callback(@dialog, 'render') do |_ctx, prompt, num_options, model_name, provider|
         if provider == 'gemini' && config['api_key'].empty?
           @dialog.execute_script("showStatus('Set your API key first', 'error')")
           next
@@ -152,16 +204,23 @@ module NanoBananaRender
         @dialog.execute_script("setLoading(true)")
 
         begin
-          capture = Tempfile.new(['skpbanana-', '.png'])
-          capture.close
-          capture_view(capture.path)
+          dir = run_directory
+          capture = File.join(dir, 'original.png')
+          capture_view(capture)
+          diagnose(dir, "captured bytes=#{File.size(capture)}")
           job = { action: 'render', provider: provider, settings: render_settings, key: config['api_key'], model: config['model'],
-                  capture: capture.path, prompt: prompt, count: num }
-          run_worker(@dialog, job, capture: capture) do |result|
-            show_results_dialog(JSON.generate(result))
+                  result_dir: dir, capture: capture, prompt: prompt, count: num }
+          run_worker(@dialog, job, dir: dir) do |result|
+            show_results_dialog(result, dir)
+            failures = result.fetch('renders').reject { |item| item['success'] }
+            if failures.any?
+              report_failure(@dialog, dir, failures.first.fetch('error'))
+            elsif @dialog.visible?
+              @dialog.execute_script("showStatus(#{JSON.generate("Results: #{dir}")}, 'success')")
+            end
           end
         rescue StandardError => e
-          capture.close! if capture
+          diagnose(dir, e.message) if dir
           @dialog.execute_script("setLoading(false)")
           @dialog.execute_script("showStatus(#{JSON.generate(e.message)}, 'error')")
         end
@@ -171,7 +230,7 @@ module NanoBananaRender
       @dialog.show
     end
 
-    def show_results_dialog(payload_json)
+    def show_results_dialog(result, dir)
       if @results_dialog && @results_dialog.visible?
         @results_dialog.close
       end
@@ -186,21 +245,31 @@ module NanoBananaRender
         style: UI::HtmlDialog::STYLE_DIALOG
       })
 
-      @results_dialog.add_action_callback('get_results') do |_ctx|
-        @results_dialog.execute_script("loadResults(#{payload_json})")
+      dialog = @results_dialog
+      dialog.add_action_callback('preview_status') do |_ctx, status|
+        diagnose(dir, "preview #{status.to_s[0, 80]}")
+      end
+      guarded_callback(dialog, 'get_results') do |_ctx|
+        dialog.execute_script("loadResults(#{JSON.generate(result)})")
       end
 
-      @results_dialog.add_action_callback('save_image') do |_ctx, base64_data, mime|
+      guarded_callback(@results_dialog, 'save_image') do |_ctx, index|
+        render = result.fetch('renders').fetch(Integer(index))
+        next unless render['success']
+        mime = render['mime']
         ext = { 'image/jpeg' => '.jpg', 'image/webp' => '.webp' }.fetch(mime, '.png')
         path = UI.savepanel('Save Rendered Image', '', "render#{ext}")
         if path
           path += ext unless path.downcase.end_with?(ext)
-          File.binwrite(path, Base64.decode64(base64_data))
+          FileUtils.cp(File.join(dir, File.basename(render.fetch('file'))), path)
           UI.messagebox("Image saved to:\n#{path}")
         end
       end
 
-      @results_dialog.set_file(html_path)
+      preview = File.join(dir, 'preview.html')
+      FileUtils.cp(html_path, preview)
+      diagnose(dir, "opening preview variations=#{result.fetch('renders').size}")
+      @results_dialog.set_file(preview)
       @results_dialog.show
     end
 
@@ -209,6 +278,11 @@ module NanoBananaRender
       submenu = menu.add_submenu('Nano Banana Pro Render')
 
       submenu.add_item('Render Current View') { show_prompt_dialog }
+      submenu.add_item('Open diagnostic folder') do
+        root = File.join(ENV['LOCALAPPDATA'] || Dir.tmpdir, 'SKPBanana', 'runs')
+        FileUtils.mkdir_p(root)
+        UI.openURL("file:///" + root.tr('\\', '/').sub(%r{^/}, '').gsub(' ', '%20'))
+      end
       submenu.add_item('Settings') { show_prompt_dialog }
 
       toolbar = UI::Toolbar.new('Nano Banana Pro')
