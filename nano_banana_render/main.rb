@@ -12,7 +12,7 @@ module NanoBananaRender
   DEFAULT_CONFIG = {
     'api_key' => '',
     'model' => 'gemini-2.5-flash-image',
-    'num_options' => 2,
+    'num_options' => 1,
     'last_prompt' => ''
   }.freeze
 
@@ -38,6 +38,17 @@ module NanoBananaRender
     def save_config
       FileUtils.mkdir_p(File.dirname(CONFIG_FILE))
       File.write(CONFIG_FILE, JSON.pretty_generate(config.reject { |k, _| k == 'api_key' }))
+    end
+
+    def render_settings
+      settings = { 'provider' => 'codex', 'codex_executable' => 'codex',
+                   'agent_model' => '', 'image_model' => 'chatgpt-image-latest' }
+      File.foreach(File.join(PLUGIN_DIR, 'render.conf'), encoding: 'bom|utf-8') do |line|
+        next if line.strip.empty? || line.lstrip.start_with?('#')
+        key, value = line.split('=', 2).map(&:strip)
+        settings[key] = value if settings.key?(key) && value
+      end
+      settings
     end
 
     def capture_view(filepath)
@@ -101,7 +112,7 @@ module NanoBananaRender
       })
 
       @dialog.add_action_callback('get_config') do |_ctx|
-        @dialog.execute_script("setConfig(#{JSON.generate(config)})")
+        @dialog.execute_script("setConfig(#{JSON.generate(config.merge(render_settings))})")
       end
 
       @dialog.add_action_callback('save_api_key') do |_ctx, key|
@@ -110,22 +121,22 @@ module NanoBananaRender
         @dialog.execute_script("showStatus('API key set for this session', 'success')")
       end
 
-      @dialog.add_action_callback('enhance_prompt') do |_ctx, prompt|
-        if config['api_key'].empty?
+      @dialog.add_action_callback('enhance_prompt') do |_ctx, prompt, provider|
+        if provider == 'gemini' && config['api_key'].empty?
           @dialog.execute_script("showStatus('Set your API key first', 'error')")
           next
         end
 
         dialog = @dialog
-        job = { action: 'enhance', key: config['api_key'], prompt: prompt }
+        job = { action: 'enhance', provider: provider, settings: render_settings, key: config['api_key'], prompt: prompt }
         dialog.execute_script("setLoading(true)")
         run_worker(dialog, job) do |enhanced|
           dialog.execute_script("setEnhancedPrompt(#{JSON.generate(enhanced)})")
         end
       end
 
-      @dialog.add_action_callback('render') do |_ctx, prompt, num_options, model_name|
-        if config['api_key'].empty?
+      @dialog.add_action_callback('render') do |_ctx, prompt, num_options, model_name, provider|
+        if provider == 'gemini' && config['api_key'].empty?
           @dialog.execute_script("showStatus('Set your API key first', 'error')")
           next
         end
@@ -144,7 +155,7 @@ module NanoBananaRender
           capture = Tempfile.new(['skpbanana-', '.png'])
           capture.close
           capture_view(capture.path)
-          job = { action: 'render', key: config['api_key'], model: config['model'],
+          job = { action: 'render', provider: provider, settings: render_settings, key: config['api_key'], model: config['model'],
                   capture: capture.path, prompt: prompt, count: num }
           run_worker(@dialog, job, capture: capture) do |result|
             show_results_dialog(JSON.generate(result))

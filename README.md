@@ -1,17 +1,6 @@
-# Nano Banana Pro Render - SketchUp Plugin
+# SKPBanana para SketchUp
 
-One-click AI rendering for SketchUp using Google's Nano Banana Pro (Gemini 3 Pro Image) API. Capture your current view, describe how you want it rendered, and compare the result with a before/after slider.
-
-## Features
-
-- **One-click view capture** - Snapshots your current SketchUp viewport at 2x resolution
-- **Nano Banana Pro rendering** - Sends your view + prompt to Google's Gemini 3 Pro Image API
-- **Prompt enhancer** - AI-powered prompt expansion that adds lighting, materials, atmosphere details
-- **Before/after slider** - Interactive comparison slider between original and rendered views
-- **Multiple variations** - Generate 1-4 render options per prompt to pick the best one
-- **Model selection** - Choose between Nano Banana Pro, Nano Banana 2 (fast), or legacy Nano Banana
-- **Dark mode UI** - Sleek dark interface throughout
-- **Save renders** - Export rendered images as PNG
+Capture a vista atual, edite a imagem por IA e compare as variações no painel. O Ruby acessa a câmera do SketchUp e o Python executa o provedor escolhido.
 
 ## Installation
 
@@ -22,42 +11,30 @@ One-click AI rendering for SketchUp using Google's Nano Banana Pro (Gemini 3 Pro
 3. Restart SketchUp
 4. The plugin appears under **Plugins > Nano Banana Pro Render** and in the toolbar
 
-## Setup
+## Usar o ChatGPT pelo Codex
 
-1. Get a Google AI API key from [Google AI Studio](https://aistudio.google.com/apikey)
-2. Open the plugin (Plugins > Nano Banana Pro Render > Render Current View)
-3. Paste your API key and click **Save** for the current SketchUp session. Saving settings also removes a legacy stored key from config.json.
+1. Instale o Codex CLI na máquina da designer e execute `codex login` com a conta ChatGPT dela. Confira com `codex login status`.
+2. Abra **Plugins → Nano Banana Pro Render → Render Current View**. O provedor padrão é **ChatGPT via Codex CLI**.
+3. Escreva o pedido de edição, escolha uma variação para o primeiro teste e clique em **Capture View & Render**. O worker anexa o PNG ao CLI e recupera o arquivo gerado na pasta da sessão. Cada variação usa a quota da conta.
+4. Compare o resultado com a captura e salve a imagem pelo painel.
 
-## Usage
+### Modelos e preferências
 
-1. Set up your SketchUp view (camera angle, scene, etc.)
-2. Click **Render Current View** from the Plugins menu or toolbar
-3. Type a prompt describing the render style you want (e.g., "Photorealistic exterior, golden hour, lush landscaping")
-4. Optionally click **Enhance Prompt** to auto-expand your prompt with professional rendering details
-5. Choose how many variations (1-4) to generate
-6. Click **Capture View & Render**
-7. Compare results using the before/after slider
-8. Save your favorite render
+Edite [render.conf](nano_banana_render/render.conf) dentro da pasta instalada da extensão. Feche e reabra o painel para recarregar os valores padrão. No Windows, o SketchUp precisa encontrar `python.exe` e `codex.exe` no próprio ambiente.
 
-## API Pricing
+| Parâmetro | Uso |
+|---|---|
+| `provider` | Provedor inicial do painel. Aceita `codex`, `openai` ou `gemini`. A escolha no painel vale para aquela operação. |
+| `agent_model` | Modelo do agente em `codex exec -m`. Deixe vazio para usar a seleção automática ou informe um modelo disponível na conta, por exemplo `gpt-6.2-sol`. |
+| `codex_executable` | Nome no PATH ou caminho completo ao executável nativo, sem aspas. |
+| `image_model` | Modelo para edição pela **OpenAI Images API**, por padrão `chatgpt-image-latest`. |
 
-Each requested variation makes a separate Gemini API call. Cost and availability depend on the selected model and account. See [Google AI pricing](https://ai.google.dev/pricing) for current rates.
+No modo Codex, o agente aciona a ferramenta nativa de imagens do ChatGPT. O CLI determina o modelo interno dessa ferramenta. O modo **OpenAI Images API** permite escolher explicitamente o modelo de imagem e exige `OPENAI_API_KEY` no ambiente do SketchUp, com cobrança da conta de API. A extensão só usa esse serviço quando selecionado. O botão **Enhance Prompt** usa o Codex nos dois modos OpenAI.
 
-## File Structure
+O Gemini continua disponível no seletor e usa a chave Google informada no painel para a sessão. Cada variação solicita uma edição ao provedor selecionado. A edição pode alterar detalhes da geometria aparente. Revise a captura e a versão gerada antes de usar o resultado.
 
-```
-nano_banana_render.rb              # Plugin loader/registration
-nano_banana_render/
-  main.rb                          # Native viewport capture, worker launch, UI management
-  worker.py                        # Python Gemini client, variations and prompt enhancement
-  html/
-    prompt_dialog.html             # Prompt input UI (dark mode)
-    results_dialog.html            # Before/after comparison slider UI
-```
+[Modo não interativo do Codex](https://developers.openai.com/codex/noninteractive) · [Edição de imagens da OpenAI](https://developers.openai.com/api/docs/guides/image-generation)
 
-## Future Plans
+## Verificação
 
-- Rhino (Grasshopper) plugin port
-- Batch rendering across saved scenes
-- Style presets library
-- Render history
+Execute `python -m unittest discover -s tests -v` na raiz do repositório. A homologação no SketchUp 2024 requer instalar o pacote, abrir uma cena, gerar uma variação e salvar o arquivo.

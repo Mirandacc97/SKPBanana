@@ -274,7 +274,15 @@
 </div>
 
 <div class="section">
-  <div class="section-title">API Configuration</div>
+  <label for="provider">Render provider</label>
+  <select id="provider" onchange="updateProvider()">
+    <option value="codex">ChatGPT via Codex CLI</option>
+    <option value="openai">OpenAI Images API (billed separately)</option>
+    <option value="gemini">Google Gemini API</option>
+  </select>
+  <div id="providerInfo"></div>
+</div>
+<div class="section" id="geminiKey" hidden>
   <label>Google AI API Key</label>
   <div class="api-key-row">
     <input type="password" id="apiKey" placeholder="Enter your Gemini API key...">
@@ -302,7 +310,7 @@
         <option value="4">4 options</option>
       </select>
     </div>
-    <div>
+    <div id="geminiModel" hidden>
       <label>Model</label>
       <select id="model">
         <option value="gemini-2.5-flash-image">Nano Banana (Stable)</option>
@@ -320,7 +328,7 @@
 
 <div class="loading-overlay" id="loadingOverlay">
   <div class="spinner"></div>
-  <div class="loading-text">Rendering with Nano Banana Pro...</div>
+  <div class="loading-text">Processing request...</div>
   <div class="loading-sub">This may take 15-60 seconds per variation</div>
 </div>
 
@@ -347,7 +355,7 @@
     const prompt = promptEl.value.trim();
     if (!prompt) return showStatus('Type a prompt first', 'error');
     showStatus('Enhancing prompt...', 'success');
-    sketchup.enhance_prompt(prompt);
+    sketchup.enhance_prompt(prompt, providerEl.value);
   }
 
   function setEnhancedPrompt(enhanced) {
@@ -362,10 +370,25 @@
     if (!prompt) return showStatus('Enter a render prompt', 'error');
     const numOptions = document.getElementById('numOptions').value;
     const model = document.getElementById('model').value;
-    sketchup.render(prompt, numOptions, model);
+    sketchup.render(prompt, numOptions, model, providerEl.value);
   }
 
+  const providerEl = document.getElementById('provider');
+  let settings = {};
+  function updateProvider() {
+    const gemini = providerEl.value === 'gemini';
+    document.getElementById('geminiKey').hidden = !gemini;
+    document.getElementById('geminiModel').hidden = !gemini;
+    document.getElementById('providerInfo').textContent = {
+      codex: 'Codex agent: ' + (settings.agent_model || 'automatic'),
+      openai: 'Image model: ' + settings.image_model + ' (OPENAI_API_KEY)',
+      gemini: ''
+    }[providerEl.value];
+  }
   function setConfig(cfg) {
+    settings = cfg;
+    providerEl.value = cfg.provider;
+    updateProvider();
     if (cfg.api_key) document.getElementById('apiKey').value = cfg.api_key;
     if (cfg.num_options) document.getElementById('numOptions').value = cfg.num_options;
     if (cfg.model) document.getElementById('model').value = cfg.model;

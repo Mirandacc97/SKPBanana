@@ -1,4 +1,4 @@
-"""Gemini worker for SketchUp. One UTF-8 JSON request and response per process."""
+"""Rendering worker for SketchUp. One UTF-8 JSON request and response per process."""
 import base64
 import json
 import re
@@ -7,6 +7,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+
+if __package__:
+    from .openai_render import api_edit, codex_run
+else:
+    from openai_render import api_edit, codex_run
 
 
 def generate(model, key, parts, modalities):
@@ -36,6 +42,29 @@ def generate(model, key, parts, modalities):
 
 
 def process(job, send=generate):
+    provider = job.get("provider", "gemini")
+    if provider not in {"gemini", "codex", "openai"}:
+        raise ValueError("Unknown render provider")
+    if provider != "gemini":
+        settings = job["settings"]
+        prompt = job["prompt"].strip()
+        if not prompt:
+            raise ValueError("Enter a prompt")
+        if job["action"] == "enhance":
+            return codex_run(settings, prompt)
+        if job["action"] != "render" or job["count"] not in range(1, 5):
+            raise ValueError("Invalid render request")
+        edit = codex_run if provider == "codex" else api_edit
+        renders = []
+        for _ in range(job["count"]):
+            try:
+                image = edit(settings, prompt, job["capture"])
+                renders.append({"success": True, "image": image, "mime": "image/png"})
+            except (ValueError, OSError) as exc:
+                renders.append({"success": False, "error": str(exc)})
+                break
+        original = base64.b64encode(Path(job["capture"]).read_bytes()).decode("ascii")
+        return {"original": original, "renders": renders}
     key = job["key"]
     prompt = job["prompt"].strip()
     if not key or not prompt:
