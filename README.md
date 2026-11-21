@@ -15,7 +15,7 @@ One-click AI rendering for SketchUp using Google's Nano Banana Pro (Gemini 3 Pro
 
 ## Installation
 
-1. Download or clone this repository
+1. Install Python 3.10+ and make `python` available to SketchUp, or set `SKPBANANA_PYTHON` to its full executable path before starting SketchUp. The Python worker uses only the standard library. Download or clone this repository.
 2. Copy `nano_banana_render.rb` and the `nano_banana_render/` folder into your SketchUp Plugins directory:
    - **Windows:** `C:\Users\<YOU>\AppData\Roaming\SketchUp\SketchUp 2024\SketchUp\Plugins\`
    - **macOS:** `~/Library/Application Support/SketchUp 2024/SketchUp/Plugins/`
@@ -26,7 +26,7 @@ One-click AI rendering for SketchUp using Google's Nano Banana Pro (Gemini 3 Pro
 
 1. Get a Google AI API key from [Google AI Studio](https://aistudio.google.com/apikey)
 2. Open the plugin (Plugins > Nano Banana Pro Render > Render Current View)
-3. Paste your API key and click **Save**
+3. Paste your API key and click **Save** for the current SketchUp session. Saving settings also removes a legacy stored key from config.json.
 
 ## Usage
 
@@ -41,14 +41,15 @@ One-click AI rendering for SketchUp using Google's Nano Banana Pro (Gemini 3 Pro
 
 ## API Pricing
 
-Nano Banana Pro uses the Gemini API which charges ~$0.04 per generated image. See [Google AI pricing](https://ai.google.dev/pricing) for current rates.
+Each requested variation makes a separate Gemini API call. Cost and availability depend on the selected model and account. See [Google AI pricing](https://ai.google.dev/pricing) for current rates.
 
 ## File Structure
 
 ```
 nano_banana_render.rb              # Plugin loader/registration
 nano_banana_render/
-  main.rb                          # Core plugin logic (capture, API, UI management)
+  main.rb                          # Native viewport capture, worker launch, UI management
+  worker.py                        # Python Gemini client, variations and prompt enhancement
   html/
     prompt_dialog.html             # Prompt input UI (dark mode)
     results_dialog.html            # Before/after comparison slider UI

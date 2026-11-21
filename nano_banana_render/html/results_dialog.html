@@ -312,7 +312,7 @@
                onmousedown="startSlide(event, ${i})"
                ontouchstart="startSlide(event, ${i})">
             <div class="img-after">
-              <img src="data:image/png;base64,${render.image}" alt="Rendered" draggable="false">
+              <img src="data:${render.mime};base64,${render.image}" alt="Rendered" draggable="false">
             </div>
             <div class="img-before" id="before-${i}" style="width: 50%;">
               <img src="data:image/png;base64,${data.original}" alt="Original" draggable="false">
@@ -380,7 +380,7 @@
   function saveImage(index) {
     const render = data.renders[index];
     if (render && render.success) {
-      sketchup.save_image(render.image);
+      sketchup.save_image(render.image, render.mime);
     }
   }
 
